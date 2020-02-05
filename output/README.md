@@ -1,4 +1,4 @@
-# ADS Project 1:  R Notebook on Lyrics Analysis
+# Project 1: Hip-Hop vs. R&B: Things You Don't Know
 
 ### Output folder
 
