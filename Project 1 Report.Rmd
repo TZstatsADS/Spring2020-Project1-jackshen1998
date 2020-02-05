@@ -1,0 +1,214 @@
+---
+title: "Hip-Pop vs R&B:Things You Don't Know"
+link-citations: yes
+output:
+  html_document:
+    df_print: paged
+  rmarkdown::html_document:
+    theme: spacelab
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+![](/Users/pro/Downloads/ads-project1/Spring2020-Project1-jackshen1998/figs/beyonce-jay-z-2018-otr-billboard-1548.jpg)
+\newline
+\newline
+\newline
+
+
+As a huge Hip-Hop fan, I have been listening to raps all the time since I was in middle school. Therefore, I noticed the merge of Hip-Pop and R&B music lately. Traditionally, people would say the main difference between Hip-Pop and R&B is that R&B is more rhythmical and melodic. However, nowadays, a lot of Hip-Pop artists, like Kanye West and Drake, bring rhythm to their songs and sometimes singing while they are rapping. Jay Z and Beyonce are the most iconic figures of Hip-Pop and R&B. The marriage of these two foreshadows the trends of combination of Hip-Pop and R&B. If you listen to the new generations of rappers, it's hard to tell if it's Hip-Pop or R&B from the rhythm perspective. Therefore, that leaves us a question, how are we going to distinguish these two types of music just by just looking at the lyrics? Let's find out the answer to this question below. 
+
+\newline
+\newline
+\newline
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+#load in packages
+library(tm)
+library(tidyverse)
+library(RColorBrewer)
+library(wordcloud2)
+library(ggplot2)
+library(topicmodels)
+library(DT)
+library(data.table)
+library(tidytext)
+
+#I will use the processed data from starter codes and select hip-pop and r&b
+load("~/Downloads/ads-project1/Spring2020-Project1-jackshen1998/output/processed_lyrics.RData")
+lyrics<-filter(dt_lyrics, genre==c("Hip-Hop","R&B"))
+
+```
+
+### Length of Lyrics
+
+Although we all know Hip-Pop should have more lyrics than R&B on average. Let's find out how huge the difference is. 
+
+```{r , echo=FALSE, message=FALSE, warning=FALSE}
+#count number of words for each row
+lyrics$count<-sapply(lyrics$lyrics,
+                     function(x) length(unlist(strsplit(as.character(x),"\\W+"))))
+
+#draw a box plot
+ggplot(lyrics,aes(genre,count)) +
+  geom_boxplot(aes(colour = genre))
+
+```
+
+\
+As the graph shown above, the median of lyrics number of Hip-Hop is around 300 higher than that of R&B. The max lyrics in a hip-hop song could reach 3000. The max of R&B is around 1500. So that's only the half of the max of lyrics in hip-hop. The gap between Hip-Hop and R&B, in terms of count of lyrics, is pretty huge.
+
+
+### Hot Words
+Hot words in the lyrics could reflect theme and feelings artisits want to express in their songs. Below are the wordclouds of Hip-Pop and R&B, containing the most frequently used words.
+\
+**Hip-Hop:**
+![](/Users/pro/Downloads/ads-project1/Spring2020-Project1-jackshen1998/figs/wordcloudhiphop.png)
+```{r, include=FALSE}
+#Hip-Hop
+hiphop<-filter(lyrics, genre == "Hip-Hop")
+leadingWhitespace <- content_transformer(function(x) str_trim(x, side = "both"))
+data("stop_words")
+word <- c("lot", "today", "months", "month", "wanna", "wouldnt", "wasnt", "ha", "na", "ooh", "da",
+        "gonna", "im", "dont", "aint", "wont", "yeah", "la", "oi",
+          "hey", "year", "years", "last", "past", "feel")
+stop_words <- c(stop_words$word, word)
+hiphop.c<- Corpus(VectorSource(hiphop$lyrics))%>%
+  tm_map(content_transformer(tolower))%>%
+  tm_map(removePunctuation)%>%
+  tm_map(removeWords, character(0))%>%
+  tm_map(removeWords, stop_words)%>%
+  tm_map(removeNumbers)%>%
+  tm_map(stripWhitespace)%>%
+  tm_map(leadingWhitespace)
+hp<-TermDocumentMatrix(hiphop.c)
+hp.tidy<-hp %>% tidy() %>% filter(count>20)
+hip.total<-summarise(group_by(hp.tidy, term), sum(count))
+
+set.seed(112)
+wordcloud2(hip.total, 
+           size = 2,
+           color = 'random-light',
+           backgroundColor = 'black',
+           minSize = 10)
+
+```
+\
+**R&B:**
+![](/Users/pro/Downloads/ads-project1/Spring2020-Project1-jackshen1998/figs/wordcloudr&b.png)
+```{r,include=FALSE}
+#R&B
+rb<-filter(lyrics, genre == "R&B")
+rb.c<- Corpus(VectorSource(rb$lyrics))%>%
+  tm_map(content_transformer(tolower))%>%
+  tm_map(removePunctuation)%>%
+  tm_map(removeWords, character(0))%>%
+  tm_map(removeWords, stop_words)%>%
+  tm_map(removeNumbers)%>%
+  tm_map(stripWhitespace)%>%
+  tm_map(leadingWhitespace)
+rnb<-TermDocumentMatrix(rb.c)
+rnb.tidy<-rnb %>% tidy() %>% filter(count>2)
+rb.total<-summarise(group_by(rnb.tidy, term), sum(count))
+
+set.seed(113)
+wordcloud2(rb.total, 
+           size = 4,
+           color = 'random-dark',
+           backgroundColor = 'white',
+           minSize = 10)
+
+```
+
+From the wordclouds above, we can see that **baby, shake, girl and money** are mentioned a lot in Hip-Pop songs. A lot of trash words are also used in Hip-Hop songs. On the other hand, R&B tend to use more moderate words like **world, baby, girl and ill**. This result acutally aligns with the tranditional impression of people to these two genres of music. Hip-Hop is more about girls and money. R&B talks more about building connection with people and hoping for the future.
+
+
+
+### Topic Modeling
+
+Now we got a basic idea of how the hit words differentiate Hip-Hop from R&B, let's dig in deeper to see if the topics of these two genres of music have any difference. More importantly, if the topics are different, what are the differences? In order to solve these questions, I applied topic modeling to the stemmedwords of these two genres of music. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+LDA_Plot <- function(data, 
+                     plot = T, 
+                     topics = 2) 
+{  
+  Corpus <- Corpus(VectorSource(data))
+  DTM <- DocumentTermMatrix(Corpus) 
+  lda <- LDA(DTM, k = topics, control = list(seed = 164))
+  topics <- tidy(lda, matrix = "beta") 
+  top_terms <- topics  %>% 
+    group_by(topic) %>% 
+    top_n(10, beta) %>%
+    ungroup() %>% 
+    arrange(topic, -beta) 
+  if(plot == T){
+    top_terms %>% 
+      mutate(term = reorder(term, beta)) %>% 
+      ggplot(aes(term, beta, fill = factor(topic))) + 
+      geom_col(show.legend = FALSE) + 
+      facet_wrap(~ topic, scales = "free") + 
+      labs(x = NULL, y = "Beta") + 
+      coord_flip() 
+  }else{ 
+    return(top_terms)
+  }
+}
+LDA_Plot(lyrics$stemmedwords)
+
+```
+
+As we can see above, I separated terms into two topics and picked top ten frequent words under each topic. I am surprised that these two topics distinct from each other so well. All the words on the left are Hip-Hop hot words and all the words on the right are R&B hot words. This indicates that the themes of these two types of music are quit different. Moreover, Hip-Pop uses a lot of aggressive(trash) words to critisize stuffs. The main theme of Hip-Hop is money,gangster and girls. On the contrary, R&B is trying to express love and hope(**baby,girl,life**). From this part, I not only consolidify my findings from wordcloud but also identify the main themes of these two genres of music. 
+
+
+
+### Sentiment Analysis
+
+For the last part, I want to explore the emotions that are contained in the lyrics and see if Hip-Hop and R&B express different sentiment. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#visualize sentiment score by matching nrc lexicon
+Nrc_Plot<- function(text,
+                    title) {
+  nrc<-text %>% inner_join(get_sentiments("nrc"),
+                           by = c("term"="word"))
+  plot<- nrc %>%
+    group_by(sentiment) %>%
+    summarise(word_count = sum(`sum(count)`)) %>%
+    ungroup %>%
+    mutate(sentiment = reorder(sentiment,word_count))
+  ggplot(plot, aes(sentiment, word_count, fill = -word_count)) +
+  geom_col() +
+  guides(fill = FALSE) +
+  labs(x = NULL, y = "Word Count") +
+  scale_y_continuous(limits = c(0, 9000)) + 
+  ggtitle(title) +
+  coord_flip()
+}
+
+Nrc_Plot(hip.total, title = "Hip-Hop NRC Sentiment")
+Nrc_Plot(rb.total, title = "R&B NRC Sentiment")
+
+```
+\
+I tried all four lexicons('Bing','Nrc','loughran','afinn') and found that Nrc had the most matches therefore I matched Nrc with the lyrics and got the graphs above. The result is not 100% accurate since not all words are matched in the lexicon and some words in lyrics may contain different sentiment. But still we can see there are more positive energy and joy in R&B lyrics. I think the reason positive and joy can rank so high in hip-hop sentiment graph is that nrc lexicon doesn't list a lot of aggressive words that are used in hip-hop lyrics. Despite that, we can still see all the negative emtions are higher than anticipation, trust and surprise. In a word, Hip-Hop lyrics incorporate more anger and there are more joy and anticipation in R&B lyrics. 
+
+### Summary
+After analyzing and comparing Hip-Hop and R&B lyrics, now we can answer the question at the start: **How are we going to distinguish these two types of music just by just looking at the lyrics?**
+\
+\
+1. Number of words in a Hip-Hop song is usually more than that of R&B song. If a song has more than 500 words, it's much more likely to be a Hip-Hop song.
+\
+2. The topics of these two types of music are different. Hip-Hop music talks more about girls, money and gangster. R&B talks more about goodwill and hope.
+\
+3. From sentiment perspective, Hip-Hop songs contain more anger and R&B songs have more positive energy and joy. 
+
+
+![](/Users/pro/Downloads/ads-project1/Spring2020-Project1-jackshen1998/figs/summary.png)
+
+
+
